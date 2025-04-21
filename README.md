@@ -1,3 +1,9 @@
+# HunyuanVideo LoRA
+
+Created a Wrapper node by porting the following:
+
+https://github.com/neph1/FramePack/tree/pr-branch
+
 # ComfyUI Wrapper for [FramePack by lllyasviel](https://lllyasviel.github.io/frame_pack_gitpage/)
 
 # WORK IN PROGRESS
