@@ -5,7 +5,7 @@
 
 
 import torch
-from comfy.utils import ProgressBar
+
 from tqdm.auto import trange
 
 
@@ -111,7 +111,6 @@ class FlowMatchUniPC:
     def sample(self, x, sigmas, callback=None, disable_pbar=False):
         order = min(3, len(sigmas) - 2)
         model_prev_list, t_prev_list = [], []
-        comfy_pbar = ProgressBar(len(sigmas)-1)
         for i in trange(len(sigmas) - 1, disable=disable_pbar):
             vec_t = sigmas[i].expand(x.shape[0])
 
@@ -132,14 +131,7 @@ class FlowMatchUniPC:
             t_prev_list = t_prev_list[-order:]
 
             if callback is not None:
-                callback_latent = model_prev_list[-1].detach()[0].permute(1,0,2,3)
-                callback(
-                    i, 
-                    callback_latent,
-                    None, 
-                    len(sigmas) - 1
-                )
-            comfy_pbar.update(1)
+                callback({'x': x, 'i': i, 'denoised': model_prev_list[-1]})
 
         return model_prev_list[-1]
 

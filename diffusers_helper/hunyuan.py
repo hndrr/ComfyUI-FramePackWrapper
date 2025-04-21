@@ -1,9 +1,15 @@
 import torch
 
-from diffusers.pipelines.hunyuan_video.pipeline_hunyuan_video import DEFAULT_PROMPT_TEMPLATE
+from diffusers.pipelines.hunyuan_video.pipeline_hunyuan_video import (
+    DEFAULT_PROMPT_TEMPLATE,
+)
+from .utils import crop_or_pad_yield_mask
+
 
 @torch.no_grad()
-def encode_prompt_conds(prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2, max_length=256):
+def encode_prompt_conds(
+    prompt, text_encoder, text_encoder_2, tokenizer, tokenizer_2, max_length=256
+):
     assert isinstance(prompt, str)
 
     prompt = [prompt]
@@ -51,7 +57,9 @@ def encode_prompt_conds(prompt, text_encoder, text_encoder_2, tokenizer, tokeniz
         return_length=False,
         return_tensors="pt",
     ).input_ids
-    clip_l_pooler = text_encoder_2(clip_l_input_ids.to(text_encoder_2.device), output_hidden_states=False).pooler_output
+    clip_l_pooler = text_encoder_2(
+        clip_l_input_ids.to(text_encoder_2.device), output_hidden_states=False
+    ).pooler_output
 
     return llama_vec, clip_l_pooler
 
@@ -74,15 +82,21 @@ def vae_decode_fake(latents):
         [-0.2315, -0.1920, -0.1355],
         [-0.0270, 0.0401, -0.0821],
         [-0.0616, -0.0997, -0.0727],
-        [0.0249, -0.0469, -0.1703]
+        [0.0249, -0.0469, -0.1703],
     ]  # From comfyui
 
     latent_rgb_factors_bias = [0.0259, -0.0192, -0.0761]
 
-    weight = torch.tensor(latent_rgb_factors, device=latents.device, dtype=latents.dtype).transpose(0, 1)[:, :, None, None, None]
-    bias = torch.tensor(latent_rgb_factors_bias, device=latents.device, dtype=latents.dtype)
+    weight = torch.tensor(
+        latent_rgb_factors, device=latents.device, dtype=latents.dtype
+    ).transpose(0, 1)[:, :, None, None, None]
+    bias = torch.tensor(
+        latent_rgb_factors_bias, device=latents.device, dtype=latents.dtype
+    )
 
-    images = torch.nn.functional.conv3d(latents, weight, bias=bias, stride=1, padding=0, dilation=1, groups=1)
+    images = torch.nn.functional.conv3d(
+        latents, weight, bias=bias, stride=1, padding=0, dilation=1, groups=1
+    )
     images = images.clamp(0.0, 1.0)
 
     return images
@@ -104,6 +118,8 @@ def vae_decode(latents, vae, image_mode=False):
 
 @torch.no_grad()
 def vae_encode(image, vae):
-    latents = vae.encode(image.to(device=vae.device, dtype=vae.dtype)).latent_dist.sample()
+    latents = vae.encode(
+        image.to(device=vae.device, dtype=vae.dtype)
+    ).latent_dist.sample()
     latents = latents * vae.config.scaling_factor
     return latents
