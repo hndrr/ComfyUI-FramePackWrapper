@@ -4,6 +4,8 @@ Created a Wrapper node by porting the following:
 
 https://github.com/neph1/FramePack/tree/pr-branch
 
+https://github.com/lllyasviel/FramePack/pull/157
+
 # ComfyUI Wrapper for [FramePack by lllyasviel](https://lllyasviel.github.io/frame_pack_gitpage/)
 
 # WORK IN PROGRESS
