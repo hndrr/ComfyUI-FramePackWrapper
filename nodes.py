@@ -1,9 +1,8 @@
 import os
 import torch
-
-# import torch.nn.functional as F # Unused
-# import gc # Unused
-# import numpy as np # Unused
+import torch.nn.functional as F
+import gc
+import numpy as np
 import math
 from tqdm import tqdm
 
@@ -12,33 +11,25 @@ from accelerate.utils import set_module_tensor_to_device
 
 import folder_paths
 import comfy.model_management as mm
-from comfy.utils import load_torch_file  # ProgressBar, common_upscale # Unused
+from comfy.utils import load_torch_file, ProgressBar, common_upscale
 import comfy.model_base
 import comfy.latent_formats
+from comfy.cli_args import args, LatentPreviewMethod
 
-# from comfy.cli_args import args, LatentPreviewMethod # Unused
+script_directory = os.path.dirname(os.path.abspath(__file__))
+vae_scaling_factor = 0.476986
 
-# LoRA specific imports
-from diffusers.loaders.lora_pipeline import _fetch_state_dict
-from diffusers.loaders.lora_conversion_utils import (
-    _convert_hunyuan_video_lora_to_diffusers,
-)
-
-# Moved helper imports here for better organization
 from .diffusers_helper.models.hunyuan_video_packed import (
     HunyuanVideoTransformer3DModelPacked,
 )
 from .diffusers_helper.memory import (
     DynamicSwapInstaller,
     move_model_to_device_with_memory_preservation,
-    # offload_model_from_device_for_memory_preservation # Unused in this file
+    offload_model_from_device_for_memory_preservation,
 )
 from .diffusers_helper.pipelines.k_diffusion_hunyuan import sample_hunyuan
 from .diffusers_helper.utils import crop_or_pad_yield_mask
 from .diffusers_helper.bucket_tools import find_nearest_bucket
-
-script_directory = os.path.dirname(os.path.abspath(__file__))
-vae_scaling_factor = 0.476986
 
 
 class HyVideoModel(comfy.model_base.BaseModel):
@@ -58,7 +49,7 @@ class HyVideoModelConfig:
     def __init__(self, dtype):
         self.unet_config = {}
         self.unet_extra_config = {}
-        self.latent_format = comfy.latent_formats.HunyuanVideo()
+        self.latent_format = comfy.latent_formats.HunyuanVideo
         self.latent_format.latent_channels = 16
         self.manual_cast_dtype = dtype
         self.sampling_settings = {"multiplier": 1.0}
@@ -113,12 +104,8 @@ class FramePackTorchCompileSettings:
     RETURN_TYPES = ("FRAMEPACKCOMPILEARGS",)
     RETURN_NAMES = ("torch_compile_args",)
     FUNCTION = "loadmodel"
-    CATEGORY = "FramePackWrapper"  # Changed category for consistency
-    DESCRIPTION = (
-        "torch.compile settings, when connected to the model loader, "
-        "torch.compile of the selected layers is attempted. "
-        "Requires Triton and torch 2.5.0 is recommended"
-    )
+    CATEGORY = "HunyuanVideoWrapper"
+    DESCRIPTION = "torch.compile settings, when connected to the model loader, torch.compile of the selected layers is attempted. Requires Triton and torch 2.5.0 is recommended"
 
     def loadmodel(
         self,
@@ -255,11 +242,7 @@ class DownloadAndLoadFramePackModel:
                         mode=compile_args["mode"],
                     )
 
-            # transformer = torch.compile(
-            #     transformer, fullgraph=compile_args["fullgraph"],
-            #     dynamic=compile_args["dynamic"],
-            #     backend=compile_args["backend"], mode=compile_args["mode"]
-            # )
+            # transformer = torch.compile(transformer, fullgraph=compile_args["fullgraph"], dynamic=compile_args["dynamic"], backend=compile_args["backend"], mode=compile_args["mode"])
 
         pipe = {
             "transformer": transformer.eval(),
@@ -275,7 +258,9 @@ class LoadFramePackModel:
             "required": {
                 "model": (
                     folder_paths.get_filename_list("diffusion_models"),
-                    {"tooltip": "Models from 'ComfyUI/models/diffusion_models'"},
+                    {
+                        "tooltip": "These models are loaded from the 'ComfyUI/models/diffusion_models' -folder",
+                    },
                 ),
                 "base_precision": (["fp32", "bf16", "fp16"], {"default": "bf16"}),
                 "quantization": (
@@ -354,7 +339,7 @@ class LoadFramePackModel:
             dtype = base_dtype
         print("Using accelerate to load and assign model weights to device...")
         param_count = sum(1 for _ in transformer.named_parameters())
-        for name, _ in tqdm(  # Use _ for unused param
+        for name, param in tqdm(
             transformer.named_parameters(),
             desc=f"Loading transformer parameters to {offload_device}",
             total=param_count,
@@ -401,124 +386,10 @@ class LoadFramePackModel:
                         mode=compile_args["mode"],
                     )
 
-            # transformer = torch.compile(
-            #     transformer, fullgraph=compile_args["fullgraph"],
-            #     dynamic=compile_args["dynamic"],
-            #     backend=compile_args["backend"], mode=compile_args["mode"]
-            # )
+            # transformer = torch.compile(transformer, fullgraph=compile_args["fullgraph"], dynamic=compile_args["dynamic"], backend=compile_args["backend"], mode=compile_args["mode"])
 
         pipe = {
             "transformer": transformer.eval(),
-            "dtype": base_dtype,
-        }
-        return (pipe,)
-
-
-class LoadFramePackLora:
-    @classmethod
-    def INPUT_TYPES(s):
-        return {
-            "required": {
-                "model": ("FramePackMODEL",),
-                "lora_name": (folder_paths.get_filename_list("loras"),),
-                "strength": (
-                    "FLOAT",
-                    {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.01},
-                ),
-            }
-        }
-
-    RETURN_TYPES = ("FramePackMODEL",)
-    RETURN_NAMES = ("model",)
-    FUNCTION = "load_lora"
-    CATEGORY = "FramePackWrapper"
-
-    def load_lora(self, model, lora_name, strength):
-        if strength == 0:
-            return (model,)
-
-        lora_path = folder_paths.get_full_path("loras", lora_name)
-        transformer = model["transformer"]
-        base_dtype = model["dtype"]
-        device = mm.get_torch_device()
-
-        print(f"Loading LoRA: {lora_name} with strength {strength}")
-
-        # Use _fetch_state_dict similar to diffusers_helper/load_lora.py
-        state_dict = _fetch_state_dict(
-            lora_path,
-            weight_name=None,  # Auto-detect based on file extension
-            use_safetensors=True,  # Assume safetensors by default
-            local_files_only=True,  # Load from local files
-            cache_dir=None,
-            force_download=False,
-            proxies=None,
-            revision=None,
-            token=None,
-            user_agent=None,
-            subfolder=None,
-            mirror=None,
-        )
-
-        # Try converting assuming Hunyuan format first, similar to diffusers_helper
-        original_keys = set(state_dict.keys())
-        try:
-            print(
-                "Attempting conversion assuming non-diffusers LoRA format (e.g., Hunyuan)..."
-            )
-            converted_state_dict = _convert_hunyuan_video_lora_to_diffusers(state_dict)
-            # Check if conversion actually changed keys or shapes (simple check)
-            conversion_successful = False
-            if set(converted_state_dict.keys()) != original_keys:
-                conversion_successful = True
-            else:
-                # Check shapes if keys are the same
-                for k in original_keys:
-                    if (
-                        k in converted_state_dict
-                        and state_dict[k].shape != converted_state_dict[k].shape
-                    ):
-                        conversion_successful = True
-                        break
-
-            if conversion_successful:
-                print("Conversion successful.")
-                state_dict = converted_state_dict
-            else:
-                print(
-                    "Conversion did not change keys/shapes, assuming Diffusers format or already converted."
-                )
-        except Exception as e:
-            print(
-                f"WARN: Failed to convert LoRA keys assuming Hunyuan format: {e}. "
-                "Proceeding with original keys, assuming Diffusers format."
-            )
-
-        # Apply strength scaling
-        scaled_state_dict = {}
-        for k, v in state_dict.items():
-            # Ensure tensor is on the correct device and dtype before scaling
-            try:
-                scaled_state_dict[k] = v.to(device=device, dtype=base_dtype) * strength
-            except Exception as e:
-                print(f"WARN: Could not scale key {k}: {e}. Skipping this key.")
-
-        # Load the scaled LoRA adapter
-        try:
-            # Ensure the transformer is on the correct device before loading
-            transformer.to(device)
-            transformer.load_lora_adapter(
-                scaled_state_dict, network_alphas=None
-            )  # Use scaled_state_dict
-            print("LoRA weights loaded and applied successfully.")
-        except Exception as e:
-            print(f"ERROR: Failed to load LoRA adapter: {e}")
-            # Return original model on failure
-            return (model,)
-
-        # Return the modified model dictionary
-        pipe = {
-            "transformer": transformer,  # Return the modified transformer
             "dtype": base_dtype,
         }
         return (pipe,)
@@ -537,7 +408,7 @@ class FramePackFindNearestBucket:
                         "min": 64,
                         "max": 2048,
                         "step": 8,
-                        "tooltip": "Target resolution for bucket search",
+                        "tooltip": "Width of the image to encode",
                     },
                 ),
             },
@@ -551,20 +422,11 @@ class FramePackFindNearestBucket:
         "width",
         "height",
     )
-
     FUNCTION = "process"
-    CATEGORY = "FramePackWrapper"  # Assuming this was intended
+    CATEGORY = "FramePackWrapper"
+    DESCRIPTION = "Finds the closes resolution bucket as defined in the orignal code"
 
     def process(self, image, base_resolution):
-        if image.shape[0] == 0:
-            # Handle case with no image input gracefully
-            print("WARN: No image provided to FramePackFindNearestBucket.")
-            # Return a default or common bucket size? Or raise error?
-            # Returning default for now.
-            return (
-                base_resolution,
-                base_resolution,
-            )
 
         H, W = image.shape[1], image.shape[2]
 
@@ -620,7 +482,7 @@ class FramePackSampler:
                         "min": 1,
                         "max": 33,
                         "step": 1,
-                        "tooltip": "Size of the latent window for sampling.",
+                        "tooltip": "The size of the latent window to use for sampling.",
                     },
                 ),
                 "total_second_length": (
@@ -630,7 +492,7 @@ class FramePackSampler:
                         "min": 1,
                         "max": 120,
                         "step": 0.1,
-                        "tooltip": "Total length of the video in seconds.",
+                        "tooltip": "The total length of the video in seconds.",
                     },
                 ),
                 "gpu_memory_preservation": (
@@ -640,16 +502,19 @@ class FramePackSampler:
                         "min": 0.0,
                         "max": 128.0,
                         "step": 0.1,
-                        "tooltip": "Amount of GPU memory (GB) to preserve.",
+                        "tooltip": "The amount of GPU memory to preserve.",
                     },
                 ),
                 "sampler": (["unipc_bh1", "unipc_bh2"], {"default": "unipc_bh1"}),
             },
             "optional": {
-                "start_latent": ("LATENT", {"tooltip": "Init Latents for image2video"}),
+                "start_latent": (
+                    "LATENT",
+                    {"tooltip": "init Latents to use for image2video"},
+                ),
                 "initial_samples": (
                     "LATENT",
-                    {"tooltip": "Init Latents for video2video"},
+                    {"tooltip": "init Latents to use for video2video"},
                 ),
                 "denoise_strength": (
                     "FLOAT",
@@ -684,13 +549,9 @@ class FramePackSampler:
         initial_samples=None,
         denoise_strength=1.0,
     ):
-
-        if start_latent is None:
-            raise ValueError("start_latent is required for FramePackSampler")
-
         total_latent_sections = (total_second_length * 30) / (latent_window_size * 4)
         total_latent_sections = int(max(round(total_latent_sections), 1))
-        print(f"Total latent sections: {total_latent_sections}")
+        print("total_latent_sections: ", total_latent_sections)
 
         transformer = model["transformer"]
         base_dtype = model["dtype"]
@@ -702,13 +563,11 @@ class FramePackSampler:
         mm.cleanup_models()
         mm.soft_empty_cache()
 
-        # Ensure start_latent is processed correctly
-        processed_start_latent = start_latent["samples"] * vae_scaling_factor
+        start_latent = start_latent["samples"] * vae_scaling_factor
         if initial_samples is not None:
             initial_samples = initial_samples["samples"] * vae_scaling_factor
-
-        print(f"Start latent shape: {processed_start_latent.shape}")
-        B, C, T, H, W = processed_start_latent.shape
+        print("start_latent", start_latent.shape)
+        B, C, T, H, W = start_latent.shape
 
         image_encoder_last_hidden_state = (
             image_embeds["last_hidden_state"].to(base_dtype).to(device)
@@ -735,9 +594,8 @@ class FramePackSampler:
 
         num_frames = latent_window_size * 4 - 3
 
-        # Initialize history_latents based on start_latent shape
         history_latents = torch.zeros(
-            size=(B, C, 1 + 2 + 16, H, W), dtype=torch.float32
+            size=(1, 16, 1 + 2 + 16, H, W), dtype=torch.float32
         ).cpu()
 
         total_generated_latent_frames = 0
@@ -754,14 +612,9 @@ class FramePackSampler:
         patcher = comfy.model_patcher.ModelPatcher(
             comfy_model, device, torch.device("cpu")
         )
-        # Import locally to avoid potential top-level import issues if optional
-        try:
-            from latent_preview import prepare_callback
+        from latent_preview import prepare_callback
 
-            callback = prepare_callback(patcher, steps)
-        except ImportError:
-            print("WARN: latent_preview module not found. Preview disabled.")
-            callback = None
+        callback = prepare_callback(patcher, steps)
 
         move_model_to_device_with_memory_preservation(
             transformer,
@@ -770,18 +623,20 @@ class FramePackSampler:
         )
 
         if total_latent_sections > 4:
-            # Hunyuan original padding trick
+            # In theory the latent_paddings should follow the above sequence, but it seems that duplicating some
+            # items looks better than expanding it when total_latent_sections > 4
+            # One can try to remove below trick and just
+            # use `latent_paddings = list(reversed(range(total_latent_sections)))` to compare
             latent_paddings = [3] + [2] * (total_latent_sections - 3) + [1, 0]
             latent_paddings_list = latent_paddings.copy()
 
         for latent_padding in latent_paddings:
-            print(f"Latent padding: {latent_padding}")
+            print(f"latent_padding: {latent_padding}")
             is_last_section = latent_padding == 0
             latent_padding_size = latent_padding * latent_window_size
 
             print(
-                f"Padding size = {latent_padding_size}, "
-                f"Is last section = {is_last_section}"
+                f"latent_padding_size = {latent_padding_size}, is_last_section = {is_last_section}"
             )
 
             indices = torch.arange(
@@ -801,22 +656,27 @@ class FramePackSampler:
                 [clean_latent_indices_pre, clean_latent_indices_post], dim=1
             )
 
-            clean_latents_pre = processed_start_latent.to(history_latents)
+            clean_latents_pre = start_latent.to(history_latents)
             clean_latents_post, clean_latents_2x, clean_latents_4x = history_latents[
                 :, :, : 1 + 2 + 16, :, :
             ].split([1, 2, 16], dim=2)
             clean_latents = torch.cat([clean_latents_pre, clean_latents_post], dim=2)
 
-            # vid2vid logic
-            input_init_latents = None
+            # vid2vid
+
             if initial_samples is not None:
                 total_length = initial_samples.shape[2]
-                max_padding = max(latent_paddings_list) if latent_paddings_list else 0
+
+                # Get the max padding value for normalization
+                max_padding = max(latent_paddings_list)
 
                 if is_last_section:
+                    # Last section should capture the end of the sequence
                     start_idx = max(0, total_length - latent_window_size)
                 else:
-                    if max_padding > 0:
+                    # Calculate windows that distribute more evenly across the sequence
+                    # This normalizes the padding values to create appropriate spacing
+                    if max_padding > 0:  # Avoid division by zero
                         progress = (max_padding - latent_padding) / max_padding
                         start_idx = int(
                             progress * max(0, total_length - latent_window_size)
@@ -826,8 +686,7 @@ class FramePackSampler:
 
                 end_idx = min(start_idx + latent_window_size, total_length)
                 print(
-                    f"Vid2Vid indices: start={start_idx}, end={end_idx}, "
-                    f"total_length={total_length}"
+                    f"start_idx: {start_idx}, end_idx: {end_idx}, total_length: {total_length}"
                 )
                 input_init_latents = initial_samples[:, :, start_idx:end_idx, :, :].to(
                     device
@@ -850,7 +709,9 @@ class FramePackSampler:
                 generated_latents = sample_hunyuan(
                     transformer=transformer,
                     sampler=sampler,
-                    initial_latent=input_init_latents,  # Pass processed init latents
+                    initial_latent=(
+                        input_init_latents if initial_samples is not None else None
+                    ),
                     strength=denoise_strength,
                     width=W * 8,
                     height=H * 8,
@@ -881,10 +742,8 @@ class FramePackSampler:
                 )
 
             if is_last_section:
-                # Prepend the original start_latent frame
                 generated_latents = torch.cat(
-                    [processed_start_latent.to(generated_latents), generated_latents],
-                    dim=2,
+                    [start_latent.to(generated_latents), generated_latents], dim=2
                 )
 
             total_generated_latent_frames += int(generated_latents.shape[2])
@@ -892,7 +751,6 @@ class FramePackSampler:
                 [generated_latents.to(history_latents), history_latents], dim=2
             )
 
-            # Slice the history to keep only the actually generated frames
             real_history_latents = history_latents[
                 :, :, :total_generated_latent_frames, :, :
             ]
@@ -903,12 +761,12 @@ class FramePackSampler:
         transformer.to(offload_device)
         mm.soft_empty_cache()
 
-        # Ensure real_history_latents is defined before returning
-        if "real_history_latents" not in locals():
-            raise RuntimeError("Sampling loop finished without generating latents.")
-
         return ({"samples": real_history_latents / vae_scaling_factor},)
 
+
+# Import the new node class and mappings from the separate file
+from .lora_loader_node import NODE_CLASS_MAPPINGS as LORA_MAPPINGS
+from .lora_loader_node import NODE_DISPLAY_NAME_MAPPINGS as LORA_DISPLAY_MAPPINGS
 
 NODE_CLASS_MAPPINGS = {
     "DownloadAndLoadFramePackModel": DownloadAndLoadFramePackModel,
@@ -916,13 +774,14 @@ NODE_CLASS_MAPPINGS = {
     "FramePackTorchCompileSettings": FramePackTorchCompileSettings,
     "FramePackFindNearestBucket": FramePackFindNearestBucket,
     "LoadFramePackModel": LoadFramePackModel,
-    "LoadFramePackLora": LoadFramePackLora,
 }
+NODE_CLASS_MAPPINGS.update(LORA_MAPPINGS)  # Merge the dictionaries
+
 NODE_DISPLAY_NAME_MAPPINGS = {
     "DownloadAndLoadFramePackModel": "(Down)Load FramePackModel",
     "FramePackSampler": "FramePackSampler",
     "FramePackTorchCompileSettings": "Torch Compile Settings",
     "FramePackFindNearestBucket": "Find Nearest Bucket",
     "LoadFramePackModel": "Load FramePackModel",
-    "LoadFramePackLora": "Load FramePack LoRA",
 }
+NODE_DISPLAY_NAME_MAPPINGS.update(LORA_DISPLAY_MAPPINGS)  # Merge the dictionaries
