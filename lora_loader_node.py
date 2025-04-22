@@ -1,4 +1,3 @@
-# import torch  # Removed unused import
 from typing import Dict, Any, Tuple
 import folder_paths
 from .diffusers_helper.load_lora import (
@@ -93,6 +92,8 @@ class LoadFramePackLora:
             print(
                 f"LoRA '{lora_name}' loaded successfully " f"with strength {strength}."
             )
+            # Ensure the entire transformer, including potentially modified LoRA layers, is on the correct device.
+            transformer.to(device=transformer.device)
 
         except Exception as e:
             print(f"Error loading LoRA {lora_name}: {e}")
