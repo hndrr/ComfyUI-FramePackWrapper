@@ -1,4 +1,5 @@
-# HunyuanVideo LoRA
+# [WIP] HunyuanVideo LoRA Wrapper for FramePackWrapper
+![lora_node](https://github.com/user-attachments/assets/bc41e442-8f58-43d9-b39f-d29a377933ea)
 
 Created a Wrapper node by porting the following:
 
