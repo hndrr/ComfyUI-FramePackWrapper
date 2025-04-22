@@ -7,6 +7,8 @@ https://github.com/neph1/FramePack/tree/pr-branch
 
 https://github.com/lllyasviel/FramePack/pull/157
 
+https://www.reddit.com/r/StableDiffusion/comments/1k363al/framepack_lora_experiment/
+
 # ComfyUI Wrapper for [FramePack by lllyasviel](https://lllyasviel.github.io/frame_pack_gitpage/)
 
 # WORK IN PROGRESS
