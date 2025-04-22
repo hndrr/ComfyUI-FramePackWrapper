@@ -59,18 +59,17 @@ class LoadFramePackLora:
             # load_lora
             state_dict = _fetch_state_dict(
                 lora_path,
-                weight_name=None,
-                is_safetensors=lora_path.endswith(".safetensors"),
-                use_remote_ckpt=False,
-                variant=None,
-                image_size=None,
-                cache_dir=None,
-                # Prefer local files
-                local_files_only=True,
-                token=None,
-                revision=None,
-                subfolder=None,
-                mirror=None,
+                None,  # weight_name
+                lora_path.endswith(".safetensors"),  # is_safetensors
+                False,  # use_remote_ckpt
+                None,  # variant
+                None,  # image_size
+                None,  # cache_dir
+                True,  # local_files_only
+                None,  # token
+                None,  # revision
+                None,  # subfolder
+                None,  # mirror
             )
 
             # Convert if necessary (assuming Hunyuan if not diffuser format)
