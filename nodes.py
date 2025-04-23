@@ -616,11 +616,12 @@ class FramePackSampler:
 
         callback = prepare_callback(patcher, steps)
 
-        move_model_to_device_with_memory_preservation(
-            transformer,
-            target_device=device,
-            preserved_memory_gb=gpu_memory_preservation,
-        )
+        # Move the initial call outside the loop or remove if redundant
+        # move_model_to_device_with_memory_preservation(
+        #     transformer,
+        #     target_device=device,
+        #     preserved_memory_gb=gpu_memory_preservation,
+        # )
 
         if total_latent_sections > 4:
             # In theory the latent_paddings should follow the above sequence, but it seems that duplicating some
@@ -631,6 +632,12 @@ class FramePackSampler:
             latent_paddings_list = latent_paddings.copy()
 
         for latent_padding in latent_paddings:
+            # Ensure the model is on the correct device at the start of each iteration, considering memory preservation
+            move_model_to_device_with_memory_preservation(
+                transformer,
+                target_device=device,
+                preserved_memory_gb=gpu_memory_preservation,
+            )
             print(f"latent_padding: {latent_padding}")
             is_last_section = latent_padding == 0
             latent_padding_size = latent_padding * latent_window_size

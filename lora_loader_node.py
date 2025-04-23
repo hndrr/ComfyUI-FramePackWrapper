@@ -92,8 +92,33 @@ class LoadFramePackLora:
             print(
                 f"LoRA '{lora_name}' loaded successfully " f"with strength {strength}."
             )
-            # Ensure the entire transformer, including potentially modified LoRA layers, is on the correct device.
-            transformer.to(device=transformer.device)
+
+            # --- Ensure LoRA parameters stay on the correct device ---
+            try:
+                import peft
+                import comfy.model_management as mm
+                lora_device = mm.get_torch_device() # Explicitly set target device to GPU
+                count = 0
+                for name, module in transformer.named_modules():
+                    if isinstance(module, peft.tuners.lora.layer.Linear) or \
+                       isinstance(module, peft.tuners.lora.layer.Conv2d): # Add other LoRA layer types if needed
+                        if hasattr(module, 'lora_A'):
+                            for layer in module.lora_A.values():
+                                if layer.weight.device != lora_device:
+                                    layer.to(lora_device)
+                                    count += 1
+                        if hasattr(module, 'lora_B'):
+                            for layer in module.lora_B.values():
+                                if layer.weight.device != lora_device:
+                                    layer.to(lora_device)
+                                    count += 1
+                if count > 0:
+                    print(f"Moved {count} LoRA parameter tensors back to device: {lora_device}")
+            except ImportError:
+                print("PEFT library not found, skipping LoRA device check.")
+            except Exception as peft_e:
+                print(f"Error ensuring LoRA parameters device: {peft_e}")
+            # --- End LoRA device check ---
 
         except Exception as e:
             print(f"Error loading LoRA {lora_name}: {e}")

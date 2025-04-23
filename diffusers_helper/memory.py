@@ -22,6 +22,9 @@ class DynamicSwapInstaller:
                     p = _parameters[name]
                     if p is None:
                         return None
+                    # Do not move LoRA parameters with DynamicSwapInstaller
+                    if name.startswith("lora_"):
+                        return p
                     if p.__class__ == torch.nn.Parameter:
                         return torch.nn.Parameter(p.to(**kwargs), requires_grad=p.requires_grad)
                     else:
@@ -29,6 +32,9 @@ class DynamicSwapInstaller:
             if '_buffers' in self.__dict__:
                 _buffers = self.__dict__['_buffers']
                 if name in _buffers:
+                    # Do not move LoRA buffers with DynamicSwapInstaller
+                    if name.startswith("lora_"):
+                        return _buffers[name] # Corrected indentation
                     return _buffers[name].to(**kwargs)
             return super(original_class, self).__getattr__(name)
 
